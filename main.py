@@ -1,17 +1,18 @@
 import os
 import requests
-from fastapi import FastAPI, Request, Response, HTTPException
+from fastapi import FastAPI, Request, Response, HTTPException, BackgroundTasks
 from dotenv import load_dotenv
-from supabase import create_client, Client
+from supabase import create_client, Client as SupabaseClient
 from openai import OpenAI
+from twilio.rest import Client as TwilioClient
 
 # Load environment variables from .env file
 load_dotenv()
 
 # Initialize Supabase
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+supabase: SupabaseClient = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Initialize Llama (NVIDIA API)
 LLAMA_API_KEY = os.getenv("LLAMA_API_KEY")
@@ -22,8 +23,9 @@ llama_client = OpenAI(
 
 app = FastAPI(title="Voraus AI WhatsApp Bot")
 
-VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "voraus_ai_verify_token_123")
-WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN", "")
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER", "whatsapp:+14155238886")
 
 @app.get("/")
 def read_root():
@@ -61,81 +63,68 @@ def get_ai_response(user_message: str) -> str:
             temperature=0.5,
             max_tokens=512,
         )
-        return completion.choices[0].message.content
+        return completion.choices[0].message.content or ""
     except Exception as e:
         print(f"Error calling Llama 3.2: {e}")
         return "Sorry, I'm having trouble connecting to my AI brain right now."
 
-def send_whatsapp_message(phone_number_id: str, to: str, text: str):
+def send_whatsapp_message(to: str, text: str):
     """
-    Sends a text message using the WhatsApp Business API.
+    Sends a text message using the Twilio WhatsApp API.
     """
-    url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "messaging_product": "whatsapp",
-        "to": to,
-        "type": "text",
-        "text": {"body": text}
-    }
+    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
+        print("Twilio credentials not configured.")
+        return
+        
+    twilio_client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    try:
+        message = twilio_client.messages.create(
+            from_=TWILIO_WHATSAPP_NUMBER,
+            body=text,
+            to=to
+        )
+        print(f"Message sent to {to} successfully. SID: {message.sid}")
+    except Exception as e:
+        print(f"Failed to send message: {e}")
+
+def process_whatsapp_message(sender_phone: str, text_content: str):
+    # 1. Get AI Response from Llama 3.2
+    ai_reply = get_ai_response(text_content)
     
-    response = requests.post(url, headers=headers, json=data)
-    if response.status_code not in [200, 201]:
-        print(f"Failed to send message: {response.text}")
-    else:
-        print(f"Message sent to {to} successfully.")
+    # 2. Send the AI reply back via WhatsApp
+    send_whatsapp_message(sender_phone, ai_reply)
+    
+    # 3. Store the chat in Supabase
+    try:
+        supabase.table("chat_history").insert({
+            "user_phone": sender_phone,
+            "user_message": text_content,
+            "ai_response": ai_reply
+        }).execute()
+        print("Saved chat to Supabase successfully.")
+    except Exception as e:
+        print(f"Note: Could not save to Supabase: {e}")
 
 @app.post("/whatsapp")
-async def handle_webhook(request: Request):
+async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
     """
-    Meta sends WhatsApp messages to this endpoint via POST request.
+    Twilio sends WhatsApp messages to this endpoint via POST request with Form Data.
     """
-    body = await request.json()
+    form_data = await request.form()
     
-    # Check if this is a WhatsApp message event
-    if body.get("object"):
-        entry = body.get("entry", [])
-        if entry and entry[0].get("changes"):
-            change = entry[0]["changes"][0]
-            value = change.get("value", {})
+    sender_phone = form_data.get("From")
+    text_content = form_data.get("Body")
+    
+    if sender_phone and text_content:
+        print(f"\n--- New Message Received ---")
+        print(f"From: {sender_phone}")
+        print(f"Content: {text_content}")
+        
+        # Schedule the AI processing in the background
+        background_tasks.add_task(
+            process_whatsapp_message, 
+            sender_phone, 
+            text_content
+        )
             
-            # Check if there are messages
-            if value.get("messages"):
-                message_data = value["messages"][0]
-                sender_phone = message_data.get("from")
-                message_type = message_data.get("type")
-                
-                print(f"\n--- New Message Received ---")
-                print(f"From: {sender_phone}")
-                print(f"Type: {message_type}")
-                
-                # Extract the phone number ID of the bot
-                phone_number_id = value.get("metadata", {}).get("phone_number_id")
-
-                if message_type == "text":
-                    text_content = message_data["text"]["body"]
-                    print(f"Content: {text_content}")
-                    
-                    # 1. Get AI Response from Llama 3.2
-                    ai_reply = get_ai_response(text_content)
-                    
-                    # 2. Send the AI reply back via WhatsApp
-                    send_whatsapp_message(phone_number_id, sender_phone, ai_reply)
-                    
-                    # 3. Store the chat in Supabase
-                    try:
-                        supabase.table("chat_history").insert({
-                            "user_phone": sender_phone,
-                            "user_message": text_content,
-                            "ai_response": ai_reply
-                        }).execute()
-                        print("Saved chat to Supabase successfully.")
-                    except Exception as e:
-                        print(f"Note: Could not save to Supabase (Have you created the 'chat_history' table yet?): {e}")
-                
-        return Response(content="EVENT_RECEIVED", status_code=200)
-    else:
-        raise HTTPException(status_code=404, detail="Not Found")
+    return Response(content="EVENT_RECEIVED", status_code=200)

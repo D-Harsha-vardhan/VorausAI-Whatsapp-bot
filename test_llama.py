@@ -27,7 +27,7 @@ def get_ai_response(user_message: str) -> str:
             temperature=0.5,
             max_tokens=512,
         )
-        return completion.choices[0].message.content
+        return completion.choices[0].message.content or ""
     except Exception as e:
         print(f"\n[ERROR] Llama 3.2 call failed: {e}")
         return "Sorry, I'm having trouble connecting to my AI brain right now."
