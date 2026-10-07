@@ -29,7 +29,7 @@ WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN", "")
 def read_root():
     return {"status": "Voraus AI WhatsApp Bot is running!"}
 
-@app.get("/webhook")
+@app.get("/whatsapp")
 def verify_webhook(request: Request):
     """
     Meta uses this endpoint to verify your webhook URL.
@@ -88,7 +88,7 @@ def send_whatsapp_message(phone_number_id: str, to: str, text: str):
     else:
         print(f"Message sent to {to} successfully.")
 
-@app.post("/webhook")
+@app.post("/whatsapp")
 async def handle_webhook(request: Request):
     """
     Meta sends WhatsApp messages to this endpoint via POST request.
