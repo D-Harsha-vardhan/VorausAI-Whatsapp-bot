@@ -52,6 +52,10 @@ def get_ai_response(user_message: str, image_url: str = None) -> str:
     """
     Calls NVIDIA Llama 3.2 11B Instruct Vision to get a response.
     """
+    # Bypass AI if no real key is set
+    if not LLAMA_API_KEY or LLAMA_API_KEY == "your_llama_api_key_here":
+        return f"Bot says: I received your message '{user_message}'! (AI is disabled right now)"
+
     try:
         content = []
         if user_message:
@@ -126,18 +130,11 @@ def process_whatsapp_message(phone_number_id: str, sender_phone: str, text_conte
         try:
             print(f"Downloading media {media_id} from WhatsApp...")
             media_bytes = download_whatsapp_media(media_id)
+            print("Media downloaded! Converting to base64 for AI processing...")
             
-            # Extract file extension from mime type
-            file_extension = mime_type.split("/")[-1] if mime_type else "jpg"
-            if file_extension == "jpeg": file_extension = "jpg"
-            file_name = f"{uuid.uuid4()}.{file_extension}"
-            
-            print(f"Uploading to Supabase bucket 'chat_media' as {file_name}...")
-            # We must specify content-type otherwise Supabase defaults to application/octet-stream
-            supabase.storage.from_("chat_media").upload(file_name, media_bytes, {"content-type": mime_type})
-            
-            image_url = supabase.storage.from_("chat_media").get_public_url(file_name)
-            print(f"Image uploaded to Supabase successfully: {image_url}")
+            import base64
+            base64_data = base64.b64encode(media_bytes).decode('utf-8')
+            image_url = f"data:{mime_type};base64,{base64_data}"
             
         except Exception as e:
             print(f"Failed to process media: {e}")

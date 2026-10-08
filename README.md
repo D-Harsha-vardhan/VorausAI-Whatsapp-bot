@@ -2,7 +2,7 @@
 
 Voraus AI is an intelligent WhatsApp bot designed to assist students with German university admissions, vocational training, visas, and bureaucracy. 
 
-Powered by **Llama 3.2 11B Vision**, this bot can answer complex questions, read and extract information from documents/images (OCR), and seamlessly store all interactions and datasets in **Supabase**.
+Powered by **Llama 3.2 11B Vision**, this bot can answer complex questions, read and extract information from documents/images (OCR), and seamlessly store interactions in **Supabase**.
 
 ---
 
@@ -27,8 +27,8 @@ graph TD;
     FastAPI -.->|1. Instantly Returns 200 OK| Meta
     
     %% Background Processing
-    FastAPI -->|2. Downloads File| Storage[(📁 Supabase Storage)]:::db
-    FastAPI -->|3. Sends Prompt & Image URL| Llama[🧠 Llama 3.2 Vision API]:::ai
+    FastAPI -->|2. Downloads Image & Encodes to Base64| FastAPI
+    FastAPI -->|3. Sends Prompt & Base64 Image| Llama[🧠 Llama 3.2 Vision API]:::ai
     Llama -->|4. Generates AI Response| FastAPI
     
     %% Final Delivery
@@ -40,10 +40,10 @@ graph TD;
 ---
 
 ## ✨ Key Features
-* **Multi-Modal AI:** Can read both standard text messages and images (PDFs/JPGs) using NVIDIA's Llama 3.2 API.
+* **Multi-Modal AI (OCR):** Can read both standard text messages and images directly using NVIDIA's Llama 3.2 API by converting media to base64 Data URIs on the fly.
 * **Instant Acknowledgment:** Uses FastAPI `BackgroundTasks` to prevent Meta's strict 3-second webhook timeouts.
-* **Cloud Storage:** Automatically downloads WhatsApp images and uploads them to a public Supabase bucket.
 * **Automated Data Injection:** Includes a highly optimized script (`upload_datasets.py`) to flawlessly inject dozens of CSV datasets directly into Supabase's PostgreSQL core.
+* **Database Logging:** Seamlessly logs user chats into a Supabase PostgreSQL database for tracking and context.
 
 ---
 
@@ -65,11 +65,10 @@ SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_KEY=your_anon_public_key
 LLAMA_API_KEY=nvapi-your-nvidia-api-key
 ```
+> **Note:** The `.env` file is completely ignored by Git for security purposes and will not be pushed to the repository.
 
 ### 3. Supabase Configuration
-You need two things set up in your Supabase project:
-1. **Database Table:** A table named `chat_history` with columns `user_phone`, `user_message`, and `ai_response`.
-2. **Storage Bucket:** A bucket named exactly `chat_media`. **It must be set to PUBLIC** so the AI can read the images.
+Ensure you have a Supabase project set up. Create a table named `chat_history` with columns `user_phone`, `user_message`, and `ai_response` to enable logging.
 
 ---
 
